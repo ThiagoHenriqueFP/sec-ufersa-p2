@@ -1,4 +1,4 @@
-import firewall.acl.ACL;
+import firewall.ACL;
 
 void main() {
     ACL acl = new ACL();

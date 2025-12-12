@@ -1,4 +1,4 @@
-package firewall.acl;
+package firewall;
 
 import common.*;
 
