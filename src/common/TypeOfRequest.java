@@ -4,5 +4,10 @@ public enum TypeOfRequest {
     ACKNOWLEDGE,
     DISCOVERY,
     REGISTER,
-    SYNC
+    RETRIEVE,
+    SYNC,
+    PROCEED,
+    EXECUTE,
+    BLOCK,
+    UNBLOCK
 }

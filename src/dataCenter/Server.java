@@ -1,5 +1,6 @@
 package dataCenter;
 
+import client.TcpClient;
 import common.*;
 import sensors.TypeOfMeasurement;
 
@@ -17,48 +18,76 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class Server implements Runnable {
-    private final Integer port;
-    private final static Map<String, String> ips = new HashMap<>();
-    private final static Set<Integer> edges = new HashSet<>() {{
+    private final Map<String, String> ips = new HashMap<>();
+    private final Set<Integer> edges = new HashSet<>() {{
         add(8080);
     }};
 
-    private final static Map<TypeOfMeasurement, List<Double>> db = new HashMap<>();
+    private final Map<TypeOfMeasurement, List<Double>> db = new HashMap<>();
 
-    private static PublicKey edgePublicKey;
-    private static KeyPair serverKeys;
+    private PublicKey proxyPublicKey;
+    private PublicKey aclPublicKey;
+    private KeyPair serverKeys;
 
-    static {
+
+    private Response requestToACL(Request request) {
+        TcpClient client;
+
+        if (aclPublicKey == null) {
+            client = new TcpClient(request, Ports.ACL);
+        } else {
+            client = new TcpClient(request, aclPublicKey, Ports.ACL);
+        }
+
+        client.run();
+
+        return client.getResponse();
+    }
+
+    private Response requestToProxy(Request request) {
+        TcpClient client;
+
+        if (proxyPublicKey == null) {
+            client = new TcpClient(request, Ports.PROXY_TCP);
+        } else {
+            client = new TcpClient(request, proxyPublicKey, Ports.PROXY_TCP);
+        }
+
+        client.run();
+
+        return client.getResponse();
+    }
+
+    public Server() {
         try {
             serverKeys = Crypto.getRsaKeyPar();
+
+            this.aclPublicKey = (PublicKey) requestToACL(new Request(serverKeys.getPublic(), TypeOfRequest.REGISTER, Ports.SERVER.getPort())).body();
+            this.proxyPublicKey = (PublicKey) requestToProxy(new Request(serverKeys.getPublic(), TypeOfRequest.REGISTER, Ports.SERVER.getPort())).body();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+
     }
 
-
-    public Server(Ports port) {
-        this.port = port.getPort();
+    public Integer discover() {
+        return Ports.PROXY_UDP.getPort();
     }
 
-    public static Integer discover() {
-        return edges.stream().findFirst().orElse(Ports.EDGE.getPort());
-    }
+    private String getAuth(String clientPort) {
+        if (!ips.containsKey(clientPort)) {
+            String hash = getHash(clientPort);
 
-    private static String getAuth(String addr) {
-        if (!ips.containsKey(addr)) {
-            String hash = getHash(addr);
-
-            ips.put(addr, hash);
+            ips.put(clientPort, hash);
         }
 
-        String edgePublicKeyBase64 = Base64.getEncoder().encodeToString(edgePublicKey.getEncoded());
+        String edgePublicKeyBase64 = Base64.getEncoder().encodeToString(proxyPublicKey.getEncoded());
         String serverPublicKeyBase64 = Base64.getEncoder().encodeToString(serverKeys.getPublic().getEncoded());
         System.out.println("[SERVER] sending hashes to client");
-        return ips.get(addr) + "<|>" + edgePublicKeyBase64 + "<|>" + serverPublicKeyBase64;
+        return ips.get(clientPort) + "<|>" + edgePublicKeyBase64 + "<|>" + serverPublicKeyBase64;
     }
 
-    private static String getHash(String textoOriginal) {
+    private String getHash(String textoOriginal) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
 
@@ -71,7 +100,7 @@ public class Server implements Runnable {
         }
     }
 
-    private static String bytesToHex(byte[] hash) {
+    private String bytesToHex(byte[] hash) {
         StringBuilder hexString = new StringBuilder(2 * hash.length);
         for (int i = 0; i < hash.length; i++) {
             String hex = Integer.toHexString(0xff & hash[i]);
@@ -83,17 +112,17 @@ public class Server implements Runnable {
         return hexString.toString();
     }
 
-    private static Response register(Object body) {
-        System.out.println("[SERVER] registering an edge server");
-        edgePublicKey = (PublicKey) body;
+    private Response register(Object body) {
+        System.out.println("[SERVER] registering a proxy server");
+        proxyPublicKey = (PublicKey) body;
         return new Response(serverKeys.getPublic());
     }
 
     @Override
     public void run() {
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            ServerSocket serverSocket = new ServerSocket(port);
-            System.out.println("[SERVER] servidor iniciado na porta " + port);
+            ServerSocket serverSocket = new ServerSocket(Ports.SERVER.getPort());
+            System.out.println("[SERVER] servidor iniciado na porta " + Ports.SERVER.getPort());
             while (true) {
                 Socket clientSocket = serverSocket.accept();
 
@@ -113,7 +142,9 @@ public class Server implements Runnable {
 
     private void process(Socket clientSocket) throws IOException {
         try {
-            String ip = clientSocket.getInetAddress().getHostAddress();
+            int port = clientSocket.getPort();
+
+            System.out.println("[SERVER] porta solicitante " + port);
 
             ObjectOutputStream out = new ObjectOutputStream(clientSocket.getOutputStream());
             out.flush();
@@ -131,12 +162,30 @@ public class Server implements Runnable {
                 request = (Request) preParsed;
             }
 
+            boolean canEnter = (boolean) requestToACL(new Request(request.origin(), TypeOfRequest.PROCEED, Ports.SERVER.getPort())).body();
+
+            if (!canEnter) {
+                System.out.println("[SERVER] " + port + " bloqueada de entrar");
+                clientSocket.close();
+            }
+
+            System.out.println("[SERVER] requisicao aceita para a porta " + port);
+
+            boolean canExecute = (boolean) requestToACL(new Request(
+                    new Request(request.origin(), request.type(), Ports.SERVER.getPort()), TypeOfRequest.EXECUTE, Ports.SERVER.getPort())
+            ).body();
+
+            if (!canExecute) {
+                System.out.println("[SERVER] " + port + " bloqueada de executar por falta de privilegios");
+                clientSocket.close();
+            }
+
             Response response;
-            System.out.println("[SERVER] processando " + ip + " requisitando " + request.type());
+            System.out.println("[SERVER] processando " + port + " requisitando " + request.type());
 
             switch (request.type()) {
                 case DISCOVERY -> response = new Response(discover());
-                case ACKNOWLEDGE -> response = new Response(getAuth(ip));
+                case ACKNOWLEDGE -> response = new Response(getAuth(String.valueOf(port)));
                 case REGISTER -> response = register(request.body());
                 case SYNC -> response = sync(request.body());
                 default -> throw new RuntimeException("Invalid request type");
@@ -151,7 +200,7 @@ public class Server implements Runnable {
         }
     }
 
-    private static Response sync(Object body) {
+    private Response sync(Object body) {
         Map<TypeOfMeasurement, List<Double>> data = (Map<TypeOfMeasurement, List<Double>>) body;
 
         System.out.println(data);

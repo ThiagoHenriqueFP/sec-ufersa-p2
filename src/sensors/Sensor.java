@@ -15,13 +15,15 @@ import static common.Crypto.parsePublicKey;
 public class Sensor implements Runnable {
 
     private String url;
-    private int port;
+    private int serverPort;
+    private int clientPort;
+    private int proxyPort;
     private String hash;
-    private Integer edgePort;
-    private PublicKey edgePublicKey;
+    private PublicKey proxyPublicKey;
     private PublicKey serverPublicKey;
     public static KeyPair keys;
     private final Random random = new Random();
+    private final boolean wrongValues;
 
     static {
 
@@ -36,31 +38,33 @@ public class Sensor implements Runnable {
         }
     }
 
-    public Sensor(String url, Ports port, boolean forceInsecure) throws Exception {
+    public Sensor(String url, Ports serverPort, Ports clientPort, boolean forceInsecure, boolean forceWrongValues) throws Exception {
         this.url = url;
-        this.port = port.getPort();
+        this.serverPort = serverPort.getPort();
+        this.clientPort = clientPort.getPort();
+        this.wrongValues = forceWrongValues;
 
         TcpClient client;
         Response response;
 
-        client = new TcpClient(new Request(null, TypeOfRequest.ACKNOWLEDGE));
+        client = new TcpClient(new Request(null, TypeOfRequest.ACKNOWLEDGE, this.clientPort), clientPort);
         client.run();
         response = client.getResponse();
 
         String[] responseBody = ((String) response.body()).split("<\\|>");
 
         this.hash = responseBody[0];
-        this.edgePublicKey = forceInsecure
+        this.proxyPublicKey = forceInsecure
                 ? keys.getPublic()
                 : parsePublicKey(responseBody[1].trim());
 
         this.serverPublicKey = parsePublicKey(responseBody[2].trim());
 
-        client = new TcpClient(new Request(null, TypeOfRequest.DISCOVERY), serverPublicKey);
+        client = new TcpClient(new Request(null, TypeOfRequest.DISCOVERY, this.clientPort), serverPublicKey, clientPort);
         client.run();
         response = client.getResponse();
 
-        this.edgePort = (Integer) response.body();
+        this.proxyPort = (Integer) response.body();
 
         System.out.println(this);
     }
@@ -70,6 +74,11 @@ public class Sensor implements Runnable {
         float max = type.getMax();
         float min = type.getMin();
 
+        if (wrongValues) {
+            max += 3.5f;
+            min -= 3.5f;
+        }
+
         int valueInRange = (int) ((Math.random() * (max - min)) + min);
 
         return valueInRange + postfix;
@@ -77,7 +86,13 @@ public class Sensor implements Runnable {
 
     private String getReport() {
         StringBuilder builder = new StringBuilder();
-        Arrays.stream(TypeOfMeasurement.values()).forEach(type -> builder.append(this.generate(type)).append(" | "));
+        Arrays
+                .stream(TypeOfMeasurement.values())
+                .forEach(
+                        type -> builder
+                                .append(this.generate(type))
+                                .append(" | ")
+                );
 
         return builder.toString();
     }
@@ -86,17 +101,17 @@ public class Sensor implements Runnable {
     public void run() throws RuntimeException {
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime end = now.plusMinutes(5);
-        try (DatagramSocket socket = new DatagramSocket()) {
+        try (DatagramSocket socket = new DatagramSocket(clientPort)) {
             InetAddress addr = InetAddress.getByName(url);
             while (LocalDateTime.now().isBefore(end)) {
                 String message = getReport();
 
                 System.out.println("[SENSOR] message: " + message);
 
-                SecurePacket sp = Crypto.getSecured(message, edgePublicKey);
+                SecurePacket sp = Crypto.getSecured(message, proxyPublicKey);
                 byte[] buffer = Utils.toByteArray(sp);
 
-                DatagramPacket packet = new DatagramPacket(buffer, buffer.length, addr, edgePort);
+                DatagramPacket packet = new DatagramPacket(buffer, buffer.length, addr, proxyPort);
                 socket.send(packet);
 
                 int delay = random.nextInt(4001) + 1000;
@@ -113,10 +128,10 @@ public class Sensor implements Runnable {
     public String toString() {
         return "Sensor{" +
                 "url='" + url + '\'' +
-                ", port=" + port +
+                ", port=" + serverPort +
                 ", hash='" + hash + '\'' +
-                ", edgePort=" + edgePort +
-                ", edgePublicKey=" + edgePublicKey +
+                ", edgePort=" + proxyPort +
+                ", edgePublicKey=" + proxyPublicKey +
                 ", serverPublicKey=" + serverPublicKey +
                 ", random=" + random +
                 '}';

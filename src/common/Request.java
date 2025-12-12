@@ -4,6 +4,7 @@ import java.io.Serializable;
 
 public record Request(
         Object body,
-        TypeOfRequest type
+        TypeOfRequest type,
+        int origin
 ) implements Serializable {
 }

@@ -20,7 +20,7 @@ import static common.Crypto.getRsaKeyPar;
 
 public class Edge implements Runnable {
     private final Integer port;
-    private PublicKey serverPublicKey;
+    private PublicKey proxyPublicKey;
     public static KeyPair keys;
 
     private Integer sync = 0;
@@ -50,9 +50,9 @@ public class Edge implements Runnable {
 
         TcpClient client;
 
-        client = new TcpClient(new Request(keys.getPublic(), TypeOfRequest.REGISTER));
+        client = new TcpClient(new Request(keys.getPublic(), TypeOfRequest.REGISTER, this.port), Ports.PROXY_TCP);
         client.run();
-        this.serverPublicKey = (PublicKey) client.getResponse().body();
+        this.proxyPublicKey = (PublicKey) client.getResponse().body();
     }
 
     synchronized public void parseToMap(String rawData) {
@@ -90,7 +90,7 @@ public class Edge implements Runnable {
     }
 
     private void syncWithServer() {
-        TcpClient c = new TcpClient(new Request(db, TypeOfRequest.SYNC), serverPublicKey);
+        TcpClient c = new TcpClient(new Request(db, TypeOfRequest.SYNC, port), proxyPublicKey, Ports.SERVER);
         c.run();
     }
 
