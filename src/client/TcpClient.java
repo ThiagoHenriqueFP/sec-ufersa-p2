@@ -46,10 +46,10 @@ public class TcpClient implements Runnable {
             if (pk != null) {
                 SecurePacket sp = Crypto.getSecured(request, pk);
                 out.writeObject(sp);
-                System.out.println("[TCP_CLIENT] sending secure packet " + sp);
+                // System.out.println("[TCP_CLIENT] sending secure packet " + sp);
             } else {
                 out.writeObject(request);
-                System.out.println("[TCP_CLIENT] sending insecure packet " + request);
+                // System.out.println("[TCP_CLIENT] sending insecure packet " + request);
             }
 
             Object preParsed = in.readObject();

@@ -1,5 +1,6 @@
 package firewall;
 
+import client.TcpClient;
 import common.*;
 import sensors.TypeOfMeasurement;
 
@@ -11,6 +12,7 @@ import java.io.ObjectOutputStream;
 import java.net.*;
 import java.security.KeyPair;
 import java.security.PublicKey;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -36,13 +38,21 @@ public class Proxy implements Runnable {
         float min = measurement.getMin();
         float max = measurement.getMax();
 
-        return !(value >= min && value <= max);
+        return value < min || value > max;
     }
 
-    private Response register(Object body) {
-        System.out.println("[SERVER] registering a proxy server");
-        serverPublicKey = (PublicKey) body;
-        return new Response(proxyKeys.getPublic());
+    private Response register(Request request) {
+        if (request.origin() == Ports.SERVER.getPort()){
+            System.out.println("[PROXY] registering a server in the proxy");
+            serverPublicKey = (PublicKey) request.body();
+            return new Response(proxyKeys.getPublic());
+        } else if (request.origin() == Ports.EDGE.getPort()) {
+            System.out.println("[PROXY] registering an edge in the proxy");
+            edgePublicKey = (PublicKey) request.body();
+            return new Response(proxyKeys.getPublic());
+        } else {
+            return null;
+        }
     }
 
     @Override
@@ -65,6 +75,7 @@ public class Proxy implements Runnable {
     private void udp() {
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             DatagramSocket socketServer = new DatagramSocket(Ports.PROXY_UDP.getPort());
+            System.out.println("[PROXY] servidor UDP iniciado na porta " + Ports.PROXY_UDP.getPort());
 
             while (true) {
                 DatagramPacket packet = new DatagramPacket(new byte[1024], 1024);
@@ -86,12 +97,11 @@ public class Proxy implements Runnable {
     private void process(DatagramPacket packet) {
         try (ByteArrayInputStream byteStream = new ByteArrayInputStream(packet.getData());
              ObjectInputStream objectStream = new ObjectInputStream(byteStream)) {
-            System.out.println("[PROXY] servidor UDP iniciado na porta " + Ports.PROXY_TCP.getPort());
             Object data = objectStream.readObject();
 
             if (data instanceof SecurePacket) {
                 SecurePacket sp = (SecurePacket) data;
-                String decriptedMessage = Crypto.applyAuth(sp, proxyKeys.getPrivate()).toString();
+                String decriptedMessage = (String) Utils.deserialize(Crypto.applyAuth(sp, proxyKeys.getPrivate()));
                 int port = packet.getPort();
                 int dangerValues = this.danger.getOrDefault(port, 0);
                 if (analyse(decriptedMessage)) {
@@ -103,10 +113,12 @@ public class Proxy implements Runnable {
 
                 if (dangerValues >= 10) {
                     System.out.println("[PROXY] blocking " + port);
+                    this.danger.put(port, 10); // to limitando em 10 so p n virar bagunca;
                     return;
                 }
 
                 proxyToEdge(decriptedMessage);
+                System.out.println("[PROXY] sending to edge from " + port);
 
             } else {
                 System.out.println("[PROXY] message not secured");
@@ -142,9 +154,9 @@ public class Proxy implements Runnable {
 
     private void process(Socket clientSocket) throws IOException {
         try {
-            int port = clientSocket.getPort();
+            int tempPort = clientSocket.getPort();
 
-            System.out.println("[PROXY] porta solicitante " + port);
+            System.out.println("[PROXY] porta efemera solicitante " + tempPort);
 
             ObjectOutputStream out = new ObjectOutputStream(clientSocket.getOutputStream());
             out.flush();
@@ -163,10 +175,11 @@ public class Proxy implements Runnable {
             }
 
             Response response;
-            System.out.println("[PROXY] processando " + port + " requisitando " + request.type());
+            int originPort = request.origin();
+            System.out.println("[PROXY] processando " + tempPort + " -> " + originPort + " requisitando " + request.type());
 
             switch (request.type()) {
-                case REGISTER -> response = register(request.body());
+                case REGISTER -> response = register(request);
                 default -> throw new RuntimeException("Invalid request type");
             }
 
@@ -207,8 +220,10 @@ public class Proxy implements Runnable {
                 if (!cleanValue.isEmpty()) {
                     double valor = Double.parseDouble(cleanValue);
 
-                    if (inDanger(tipos[i], valor))
+                    if (inDanger(tipos[i], valor)){
+                        System.out.println(tipos[i] + " received a danger value from " + valor);
                         return true;
+                    }
                 }
             } catch (NumberFormatException e) {
                 System.err.println("Erro ao converter valor: " + parts[i]);

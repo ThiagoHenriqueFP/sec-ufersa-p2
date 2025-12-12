@@ -30,7 +30,7 @@ public class ACL implements Runnable {
     }
 
     private final List<TypeOfRequest> server = List.of();
-    private final List<TypeOfRequest> sensor = List.of();
+    private final List<TypeOfRequest> sensor = List.of(TypeOfRequest.ACKNOWLEDGE, TypeOfRequest.DISCOVERY);
 
     private final List<TypeOfRequest> client = List.of(TypeOfRequest.RETRIEVE);
     private final List<TypeOfRequest> edge = List.of(TypeOfRequest.REGISTER, TypeOfRequest.SYNC);
@@ -57,7 +57,8 @@ public class ACL implements Runnable {
         Request request = (Request) data;
         var accesses = rules.get(Ports.from((int) request.body()));
         if (accesses == null)
-            return new Response(false);;
+            return new Response(false);
+        ;
 
         TypeOfRequest type = accesses.stream().filter(it -> it == request.type()).findFirst().orElse(null);
 
@@ -112,7 +113,6 @@ public class ACL implements Runnable {
 
     private void process(Socket clientSocket) throws IOException {
         try {
-            int port = clientSocket.getPort();
 
             ObjectOutputStream out = new ObjectOutputStream(clientSocket.getOutputStream());
             out.flush();
@@ -131,7 +131,9 @@ public class ACL implements Runnable {
             }
 
             Response response;
-            System.out.println("[ACL] processando " + port + " requisitando " + request.type());
+            int tempPort = clientSocket.getPort();
+            int originPort = request.origin();
+            System.out.println("[ACL] processando " + tempPort + " -> " + originPort + " requisitando " + request.type());
 
             switch (request.type()) {
                 case REGISTER -> response = register(request.body());

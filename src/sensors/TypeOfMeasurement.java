@@ -16,7 +16,7 @@ public enum TypeOfMeasurement {
     private float max;
     private float min;
 
-    TypeOfMeasurement(String postfix, float max, float min) {
+    TypeOfMeasurement(String postfix, float min, float max) {
         this.postfix = postfix;
         this.max = max;
         this.min = min;

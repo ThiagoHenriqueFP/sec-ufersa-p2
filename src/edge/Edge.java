@@ -97,7 +97,7 @@ public class Edge implements Runnable {
     @Override
     public void run() {
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            DatagramSocket socketServer = new DatagramSocket(port);
+            DatagramSocket socketServer = new DatagramSocket(Ports.EDGE.getPort());
 
             while (true) {
                 DatagramPacket packet = new DatagramPacket(new byte[1024], 1024);
@@ -124,7 +124,7 @@ public class Edge implements Runnable {
 
             if (data instanceof SecurePacket) {
                 SecurePacket sp = (SecurePacket) data;
-                String decriptedMessage = Crypto.applyAuth(sp, keys.getPrivate()).toString();
+                String decriptedMessage = (String) Utils.deserialize(Crypto.applyAuth(sp, keys.getPrivate()));
                 parseToMap(decriptedMessage);
 
             } else {

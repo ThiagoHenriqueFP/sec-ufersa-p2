@@ -47,7 +47,7 @@ public class Sensor implements Runnable {
         TcpClient client;
         Response response;
 
-        client = new TcpClient(new Request(null, TypeOfRequest.ACKNOWLEDGE, this.clientPort), clientPort);
+        client = new TcpClient(new Request(null, TypeOfRequest.ACKNOWLEDGE, this.clientPort), serverPort);
         client.run();
         response = client.getResponse();
 
@@ -60,7 +60,7 @@ public class Sensor implements Runnable {
 
         this.serverPublicKey = parsePublicKey(responseBody[2].trim());
 
-        client = new TcpClient(new Request(null, TypeOfRequest.DISCOVERY, this.clientPort), serverPublicKey, clientPort);
+        client = new TcpClient(new Request(null, TypeOfRequest.DISCOVERY, this.clientPort), serverPublicKey, serverPort);
         client.run();
         response = client.getResponse();
 

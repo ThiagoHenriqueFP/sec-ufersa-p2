@@ -27,6 +27,7 @@ public class Server implements Runnable {
 
     private PublicKey proxyPublicKey;
     private PublicKey aclPublicKey;
+    private PublicKey edgePublicKey;
     private KeyPair serverKeys;
 
 
@@ -142,9 +143,9 @@ public class Server implements Runnable {
 
     private void process(Socket clientSocket) throws IOException {
         try {
-            int port = clientSocket.getPort();
+            int tempPort = clientSocket.getPort();
 
-            System.out.println("[SERVER] porta solicitante " + port);
+            System.out.println("[SERVER] porta efemera solicitante " + tempPort);
 
             ObjectOutputStream out = new ObjectOutputStream(clientSocket.getOutputStream());
             out.flush();
@@ -162,30 +163,35 @@ public class Server implements Runnable {
                 request = (Request) preParsed;
             }
 
+            int originPort = request.origin();
+
             boolean canEnter = (boolean) requestToACL(new Request(request.origin(), TypeOfRequest.PROCEED, Ports.SERVER.getPort())).body();
 
             if (!canEnter) {
-                System.out.println("[SERVER] " + port + " bloqueada de entrar");
+                System.out.println("[SERVER] " + tempPort + " -> " + originPort  + " bloqueada de entrar");
                 clientSocket.close();
+                return ;
             }
 
-            System.out.println("[SERVER] requisicao aceita para a porta " + port);
+            System.out.println("[SERVER] requisicao aceita para a porta " + tempPort);
 
             boolean canExecute = (boolean) requestToACL(new Request(
                     new Request(request.origin(), request.type(), Ports.SERVER.getPort()), TypeOfRequest.EXECUTE, Ports.SERVER.getPort())
             ).body();
 
             if (!canExecute) {
-                System.out.println("[SERVER] " + port + " bloqueada de executar por falta de privilegios");
+                System.out.println("[SERVER] " + tempPort + " -> " + originPort + " bloqueada de executar por falta de privilegios");
                 clientSocket.close();
+                return ;
             }
 
             Response response;
-            System.out.println("[SERVER] processando " + port + " requisitando " + request.type());
+
+            System.out.println("[SERVER] processando " + tempPort + " -> " + originPort + " requisitando " + request.type());
 
             switch (request.type()) {
                 case DISCOVERY -> response = new Response(discover());
-                case ACKNOWLEDGE -> response = new Response(getAuth(String.valueOf(port)));
+                case ACKNOWLEDGE -> response = new Response(getAuth(String.valueOf(originPort)));
                 case REGISTER -> response = register(request.body());
                 case SYNC -> response = sync(request.body());
                 default -> throw new RuntimeException("Invalid request type");
