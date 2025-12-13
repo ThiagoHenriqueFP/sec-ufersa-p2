@@ -49,6 +49,17 @@ public class Proxy implements Runnable {
         } else if (request.origin() == Ports.EDGE.getPort()) {
             System.out.println("[PROXY] registering an edge in the proxy");
             edgePublicKey = (PublicKey) request.body();
+
+            TcpClient client;
+
+            client = new TcpClient(
+                    new Request(edgePublicKey, TypeOfRequest.EXCHANGE_PK, Ports.EDGE.getPort())
+            );
+            client.run();
+            // garantir o retorno da pk
+            PublicKey serverPK = (PublicKey) client.getResponse().body();
+            proxyToEdge(serverPK);
+
             return new Response(proxyKeys.getPublic());
         } else {
             return null;
@@ -193,6 +204,19 @@ public class Proxy implements Runnable {
     }
 
     private void proxyToEdge(String data) {
+        try (DatagramSocket socket = new DatagramSocket()) {
+            InetAddress addr = InetAddress.getLocalHost();
+                SecurePacket sp = Crypto.getSecured(data, edgePublicKey);
+                byte[] buffer = Utils.toByteArray(sp);
+
+                DatagramPacket packet = new DatagramPacket(buffer, buffer.length, addr, Ports.EDGE.getPort());
+                socket.send(packet);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void proxyToEdge(Object data) {
         try (DatagramSocket socket = new DatagramSocket()) {
             InetAddress addr = InetAddress.getLocalHost();
                 SecurePacket sp = Crypto.getSecured(data, edgePublicKey);

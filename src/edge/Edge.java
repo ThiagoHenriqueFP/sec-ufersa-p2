@@ -19,40 +19,27 @@ import java.util.concurrent.Executors;
 import static common.Crypto.getRsaKeyPar;
 
 public class Edge implements Runnable {
-    private final Integer port;
-    private PublicKey proxyPublicKey;
-    public static KeyPair keys;
+    private PublicKey serverPublicKey;
+    public KeyPair keys;
 
     private Integer sync = 0;
     private final Map<TypeOfMeasurement, List<Double>> db = new HashMap<>();
 
-    static {
-
+    public Edge() {
         try {
-
             keys = getRsaKeyPar();
-
         } catch (Exception e) {
-
             throw new RuntimeException(e);
-
         }
 
-    }
+        TcpClient client;
 
-    public Edge(Ports port) {
+        client = new TcpClient(new Request(keys.getPublic(), TypeOfRequest.REGISTER, Ports.EDGE.getPort()), Ports.PROXY_TCP);
+        client.run();
 
         Arrays.stream(TypeOfMeasurement.values()).forEach(type ->
                 db.put(type, new ArrayList<>(10))
         );
-
-        this.port = port.getPort();
-
-        TcpClient client;
-
-        client = new TcpClient(new Request(keys.getPublic(), TypeOfRequest.REGISTER, this.port), Ports.PROXY_TCP);
-        client.run();
-        this.proxyPublicKey = (PublicKey) client.getResponse().body();
     }
 
     synchronized public void parseToMap(String rawData) {
@@ -62,9 +49,10 @@ public class Edge implements Runnable {
         TypeOfMeasurement[] tipos = TypeOfMeasurement.values();
 
         int limit = Math.min(parts.length, tipos.length);
+        int i = 0;
 
-        for (int i = 0; i < limit; i++) {
-            try {
+        try {
+            for (i = 0; i < limit; i++) {
                 String cleanValue = parts[i].replaceAll("[^0-9.-]", "");
 
                 if (!cleanValue.isEmpty()) {
@@ -77,20 +65,22 @@ public class Edge implements Runnable {
                     list.add(valor);
 
                     db.put(tipos[i], list);
-                    ++sync;
-                    if (sync == 10) {
-                        syncWithServer();
-                        sync = 0;
-                    }
                 }
-            } catch (NumberFormatException e) {
-                System.err.println("Erro ao converter valor: " + parts[i]);
             }
+            ++sync;
+            System.out.println(sync);
+            if (sync == 10) {
+                syncWithServer();
+                sync = 0;
+            }
+        } catch (NumberFormatException e) {
+            System.err.println("Erro ao converter valor: " + parts[i]);
         }
     }
 
     private void syncWithServer() {
-        TcpClient c = new TcpClient(new Request(db, TypeOfRequest.SYNC, port), proxyPublicKey, Ports.SERVER);
+        System.out.println("[EDGE] sincronizando " + db.values().stream().findFirst().orElse(new ArrayList<>()).size() + " dados com o servidor principal");
+        TcpClient c = new TcpClient(new Request(db, TypeOfRequest.SYNC, Ports.EDGE.getPort()), serverPublicKey, Ports.SERVER);
         c.run();
     }
 
@@ -98,7 +88,7 @@ public class Edge implements Runnable {
     public void run() {
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             DatagramSocket socketServer = new DatagramSocket(Ports.EDGE.getPort());
-
+            System.out.println("[EDGE] edge iniciada na porta " + Ports.EDGE.getPort());
             while (true) {
                 DatagramPacket packet = new DatagramPacket(new byte[1024], 1024);
                 socketServer.receive(packet);
@@ -124,9 +114,13 @@ public class Edge implements Runnable {
 
             if (data instanceof SecurePacket) {
                 SecurePacket sp = (SecurePacket) data;
-                String decriptedMessage = (String) Utils.deserialize(Crypto.applyAuth(sp, keys.getPrivate()));
-                parseToMap(decriptedMessage);
-
+                Object dataBytes = Utils.deserialize(Crypto.applyAuth(sp, keys.getPrivate()));
+                if (dataBytes instanceof PublicKey) {
+                    this.serverPublicKey = (PublicKey) dataBytes;
+                } else {
+                    String decriptedMessage = (String) dataBytes;
+                    parseToMap(decriptedMessage);
+                }
             } else {
                 System.out.println("[EDGE] message not secured");
             }

@@ -33,7 +33,7 @@ public class ACL implements Runnable {
     private final List<TypeOfRequest> sensor = List.of(TypeOfRequest.ACKNOWLEDGE, TypeOfRequest.DISCOVERY);
 
     private final List<TypeOfRequest> client = List.of(TypeOfRequest.RETRIEVE);
-    private final List<TypeOfRequest> edge = List.of(TypeOfRequest.REGISTER, TypeOfRequest.SYNC);
+    private final List<TypeOfRequest> edge = List.of(TypeOfRequest.REGISTER, TypeOfRequest.SYNC, TypeOfRequest.EXCHANGE_PK);
     private final List<Ports> blocked = new ArrayList<>();
 
     private Map<Ports, List<TypeOfRequest>> rules = new HashMap<>() {{
@@ -58,7 +58,6 @@ public class ACL implements Runnable {
         var accesses = rules.get(Ports.from((int) request.body()));
         if (accesses == null)
             return new Response(false);
-        ;
 
         TypeOfRequest type = accesses.stream().filter(it -> it == request.type()).findFirst().orElse(null);
 
@@ -98,7 +97,6 @@ public class ACL implements Runnable {
 
                 executor.submit(() -> {
                     try {
-                        System.out.println("[ACL] trying to process");
                         process(clientSocket);
                     } catch (IOException e) {
                         e.printStackTrace();

@@ -165,7 +165,7 @@ public class Server implements Runnable {
 
             int originPort = request.origin();
 
-            boolean canEnter = (boolean) requestToACL(new Request(request.origin(), TypeOfRequest.PROCEED, Ports.SERVER.getPort())).body();
+            boolean canEnter = (boolean) requestToACL(new Request(request.origin(), TypeOfRequest.PROCEED, request.origin())).body();
 
             if (!canEnter) {
                 System.out.println("[SERVER] " + tempPort + " -> " + originPort  + " bloqueada de entrar");
@@ -176,7 +176,7 @@ public class Server implements Runnable {
             System.out.println("[SERVER] requisicao aceita para a porta " + tempPort);
 
             boolean canExecute = (boolean) requestToACL(new Request(
-                    new Request(request.origin(), request.type(), Ports.SERVER.getPort()), TypeOfRequest.EXECUTE, Ports.SERVER.getPort())
+                    new Request(request.origin(), request.type(), Ports.SERVER.getPort()), TypeOfRequest.EXECUTE, request.origin())
             ).body();
 
             if (!canExecute) {
@@ -194,6 +194,7 @@ public class Server implements Runnable {
                 case ACKNOWLEDGE -> response = new Response(getAuth(String.valueOf(originPort)));
                 case REGISTER -> response = register(request.body());
                 case SYNC -> response = sync(request.body());
+                case EXCHANGE_PK -> response = registerEdge(request.body());
                 default -> throw new RuntimeException("Invalid request type");
             }
 
@@ -206,13 +207,18 @@ public class Server implements Runnable {
         }
     }
 
+    private Response registerEdge(Object body) {
+        this.edgePublicKey = (PublicKey) body;
+        return new Response(serverKeys.getPublic());
+    }
+
     private Response sync(Object body) {
         Map<TypeOfMeasurement, List<Double>> data = (Map<TypeOfMeasurement, List<Double>>) body;
 
         System.out.println(data);
 
         data.forEach((k, v) -> {
-            var list = db.get(k);
+            var list = db.getOrDefault(k, new ArrayList<>());
             list.addAll(v);
             db.put(k, list);
         });

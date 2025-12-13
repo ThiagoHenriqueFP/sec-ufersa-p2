@@ -10,4 +10,5 @@ public enum TypeOfRequest {
     EXECUTE,
     BLOCK,
     UNBLOCK,
+    EXCHANGE_PK
 }
